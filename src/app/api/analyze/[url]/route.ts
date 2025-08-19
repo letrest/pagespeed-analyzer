@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import puppeteer from 'puppeteer';
-import fs from 'fs';
-import path from 'path';
+import { directAnalyze, psiAnalyze } from '@/../lib/helper/analyze'; // Import direct analysis function
+
 
 export async function GET(request: NextRequest, { params }: { params: { url: string } }) {
   const { url } = await params
@@ -19,58 +18,24 @@ export async function GET(request: NextRequest, { params }: { params: { url: str
   console.log('Domain:', domain);
   console.log('Site URL:', fullSite);
   console.log('Path Name:', pathName);
-  let browser;
   try {
-    // Launch Puppeteer
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'] 
-    });
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 800 }); // Set desktop viewport size
-
-    // Navigate to the URL and take a desktop screenshot
-    await page.goto(fullPath, { waitUntil: 'networkidle0' });
-    const desktopScreenshotPath = path.join(domain + pathName + '_desktop.png');
-    await page.screenshot({ path: path.join('public',desktopScreenshotPath) });
-
-    await page.setViewport({ width: 360, height: 800 }); // Set mobile viewport size
-
-    // Navigate to the URL and take a mobile screenshot
-    await page.goto(fullPath, { waitUntil: 'networkidle0' });
-    const mobileScreenshotPath = path.join(domain + pathName  + '_mobile.png');
-    await page.screenshot({ path: path.join('public',mobileScreenshotPath) });
-    await page.close();
-    
-
+    const directAnalyzeResult = await directAnalyze(fullPath);
+    if (!directAnalyzeResult) {
+      return NextResponse.json({ error: 'Failed to get direct analysis.' }, { status: 500 });
+    }
+    const { desktopScreenshotPath, mobileScreenshotPath } = directAnalyzeResult;
     // Fetch PageSpeed Insights data
-    const apiKey = process.env.PAGESPEED_API_KEY;
-    if (!apiKey) {
-      console.error('PAGESPEED_API_KEY is not set.');
-      return NextResponse.json({ error: 'PageSpeed API key is not configured.' }, { status: 500 });
-    }
-    const pagespeedApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(fullPath)}&key=${apiKey}&strategy=DESKTOP`; // Added DESKTOP strategy
-    const pagespeedResponse = await fetch(pagespeedApiUrl);
-    const pagespeedData = await pagespeedResponse.json();
+    const psiResult = await psiAnalyze(fullPath);
+    // console.log('PageSpeed Insights data:', JSON.stringify(psiResult));
 
-    if (pagespeedResponse.status !== 200) {
-      console.error('Error fetching PageSpeed Insights data:', pagespeedData);
-      return NextResponse.json({ error: 'Failed to fetch PageSpeed Insights data', details: pagespeedData }, { status: pagespeedResponse.status });
-    }
-    console.log('PageSpeed Insights data:', JSON.stringify(pagespeedData));
-    // Save screenshots to public directory
     return NextResponse.json({
-      desktopScreenshotUrl: desktopScreenshotPath,
-      mobileScreenshotUrl: mobileScreenshotPath,
-      pagespeedData,
+      desktopScreenshotUrl: desktopScreenshotPath ? desktopScreenshotPath : null,
+      mobileScreenshotUrl: mobileScreenshotPath ? mobileScreenshotPath : null,
+      pagespeedData: psiResult,
     });
   } catch (error) {
-    console.error('Error in analyze endpoint:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-    return NextResponse.json({ error: 'Failed to analyze URL', details: errorMessage }, { status: 500 });
-  } finally {
-    if (browser) {
-      await browser.close();
-    }
+      console.error('Error in analyze endpoint:', error);
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      return NextResponse.json({ error: 'Failed to analyze URL', details: errorMessage }, { status: 500 });
   }
 }
